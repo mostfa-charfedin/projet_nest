@@ -2,115 +2,75 @@ import {
   Controller,
   Get,
   Post,
-  Put,
-  Delete,
   Body,
   Param,
-  Query,
-  Headers,
-  HttpException,
-  HttpStatus,
+  Put,
+  Delete,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
+import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
-
-interface User {
-  id: number;
-  username: string;
-  email: string;
-  status: string;
-}
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Controller('users')
 export class UsersController {
-  private users: User[] = [
-    {
-      id: 1,
-      username: 'Mohamed',
-      email: 'mohamed@esprit.tn',
-      status: 'active',
-    },
-    { id: 2, username: 'Sarra', email: 'sarra@esprit.tn', status: 'inactive' },
-    { id: 3, username: 'Ali', email: 'ali@esprit.tn', status: 'inactive' },
-    { id: 4, username: 'Eya', email: 'eya@esprit.tn', status: 'active' },
-  ];
+  constructor(private readonly usersService: UsersService) {}
+
+  @Post()
+  create(@Body() createUserDto: CreateUserDto) {
+    return this.usersService.create(createUserDto);
+  }
 
   @Get()
-  getAllUsers(@Query('status') status?: string) {
-    if (status) {
-      return this.users.filter((user) => user.status === status);
-    }
-    return this.users;
+  findAll() {
+    return this.usersService.findAll();
   }
 
-  @Get('active/:status')
-  getActiveUsers(@Param('status') status: string) {
-    return this.users.filter((user) => user.status === status);
-  }
-
-  @Get(':id')
-  getUserById(@Param('id') id: string) {
-    const user = this.users.find((u) => u.id === parseInt(id));
+  @Get('email/:email')
+  async findOneByEmail(@Param('email') email: string) {
+    const user = await this.usersService.findOneByEmail(email);
     if (!user) {
-      throw new HttpException('Utilisateur non trouvé', HttpStatus.NOT_FOUND);
+      throw new NotFoundException(`User with email ${email} not found`);
     }
     return user;
   }
 
-  // 1. Utilisation du DTO CreateUserDto dans la méthode de création
-  @Post()
-  createUser(
-    @Body() createUserDto: CreateUserDto,
-    @Headers('authorization') authorization: string,
-  ) {
-    console.log('Authorization header:', authorization);
-
-    const newUser: User = {
-      id: this.users.length + 1,
-      username: createUserDto.username,
-      email: createUserDto.email,
-      status: 'active', // Par défaut
-    };
-
-    this.users.push(newUser);
-    return {
-      message: 'Utilisateur créé avec succès',
-      user: newUser,
-    };
+  @Get('active')
+  findActive() {
+    return this.usersService.findActive();
   }
 
-  // 2. Utilisation du DTO CreateUserDto dans la méthode de mise à jour
-  @Put(':id')
-  updateUser(@Param('id') id: string, @Body() createUserDto: CreateUserDto) {
-    const userIndex = this.users.findIndex((u) => u.id === parseInt(id));
-
-    if (userIndex === -1) {
-      throw new HttpException('Utilisateur non trouvé', HttpStatus.NOT_FOUND);
+  @Get(':id')
+  async findOne(@Param('id') id: string) {
+    try {
+      return await this.usersService.findOneById(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new NotFoundException(message);
     }
+  }
 
-    this.users[userIndex] = {
-      ...this.users[userIndex],
-      username: createUserDto.username,
-      email: createUserDto.email,
-    };
-
-    return {
-      message: 'Utilisateur mis à jour avec succès',
-      user: this.users[userIndex],
-    };
+  @Put(':id')
+  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+    return this.usersService.update(id, updateUserDto);
   }
 
   @Delete(':id')
-  deleteUser(@Param('id') id: string) {
-    const userIndex = this.users.findIndex((u) => u.id === parseInt(id));
+  remove(@Param('id') id: string) {
+    return this.usersService.remove(id);
+  }
 
-    if (userIndex === -1) {
-      throw new HttpException('Utilisateur non trouvé', HttpStatus.NOT_FOUND);
+  @Post('activate')
+  async activateAccount(@Body() body: { email: string; password: string }) {
+    try {
+      return await this.usersService.activateAccount(body.email, body.password);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new BadRequestException(message);
     }
-
-    const deletedUser = this.users.splice(userIndex, 1);
-    return {
-      message: 'Utilisateur supprimé avec succès',
-      user: deletedUser[0],
-    };
   }
 }

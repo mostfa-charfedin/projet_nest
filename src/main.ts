@@ -1,20 +1,31 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { AppModule } from './app.module';
+import { Logger } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const logger = new Logger('Bootstrap');
 
-  // Configuration de la validation globale pour l'application
+  // Enable CORS
+  app.enableCors();
+
+  // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
-      forbidNonWhitelisted: true,
       transform: true,
+      forbidNonWhitelisted: true,
     }),
   );
 
-  await app.listen(3000);
-  console.log('Application lancée sur http://localhost:3000');
+  const port = process.env.PORT || 3000;
+  await app.listen(port);
+
+  logger.log(`Application is running on: http://localhost:${port}`);
 }
-bootstrap();
+
+bootstrap().catch((err) => {
+  console.error('Error starting the application', err);
+  process.exit(1);
+});
