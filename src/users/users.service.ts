@@ -1,114 +1,178 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MongoRepository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ObjectId } from 'mongodb';
-import * as bcryptjs from 'bcryptjs';
+import { Utilisateurs } from '../entities/utilisateurs';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { User } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
-  private readonly logger = new Logger(UsersService.name);
-
   constructor(
-    @InjectRepository(User)
-    private usersRepository: MongoRepository<User>,
+    @InjectRepository(Utilisateurs)
+    private readonly utilisateursRepository: Repository<Utilisateurs>,
   ) {}
 
-  async create(createUserDto: CreateUserDto): Promise<User> {
-    const hashedPassword = await bcryptjs.hash(createUserDto.password, 10);
-    const user = this.usersRepository.create({
+  async create(createUserDto: CreateUserDto): Promise<Utilisateurs> {
+    const utilisateur = this.utilisateursRepository.create({
       ...createUserDto,
-      password: hashedPassword,
       active: false,
     });
-    return this.usersRepository.save(user);
+    return await this.utilisateursRepository.save(utilisateur);
   }
 
-  async findAll(): Promise<User[]> {
-    return this.usersRepository.find();
+  async findAll(): Promise<Utilisateurs[]> {
+    return await this.utilisateursRepository.find();
   }
 
-  async findOneById(id: string): Promise<User> {
+  async findOneById(id: string): Promise<Utilisateurs> {
     if (!ObjectId.isValid(id)) {
-      throw new NotFoundException(`Invalid user ID: ${id}`);
-    }
-    const user = await this.usersRepository.findOne({
-      where: { _id: new ObjectId(id) },
-    });
-    if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
-    }
-    return user;
-  }
-
-  async findOneByEmail(email: string): Promise<User | undefined> {
-    try {
-      const user = await this.usersRepository.findOne({ where: { email } });
-      return user || undefined;
-    } catch (error) {
-      this.logger.error(`Error finding user by email: ${error}`);
-      return undefined;
-    }
-  }
-
-  async findActive(): Promise<User[]> {
-    return this.usersRepository.find({ where: { active: true } });
-  }
-
-  async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-    // Vérification de l'ID
-    if (!ObjectId.isValid(id)) {
-      throw new NotFoundException(`ID utilisateur invalide: ${id}`);
+      throw new BadRequestException('ID invalide');
     }
 
-    // Recherche de l'utilisateur
-    const user = await this.usersRepository.findOne({
-      where: { _id: new ObjectId(id) },
+    const utilisateur = await this.utilisateursRepository.findOne({
+      where: { _id: new ObjectId(id) } as any,
     });
 
-    if (!user) {
-      throw new NotFoundException(`Utilisateur avec l'ID ${id} non trouvé`);
+    if (!utilisateur) {
+      throw new NotFoundException(`Utilisateur avec id ${id} non trouvé`);
     }
 
-    // Mise à jour des champs
-    if (updateUserDto.email !== undefined && updateUserDto.email !== null) {
-      user.email = updateUserDto.email as string;
+    return utilisateur;
+  }
+
+  async findOneByEmail(email: string): Promise<Utilisateurs> {
+    const utilisateur = await this.utilisateursRepository.findOne({
+      where: { email } as any,
+    });
+
+    if (!utilisateur) {
+      throw new NotFoundException(`Utilisateur avec email ${email} non trouvé`);
     }
 
-    if (
-      updateUserDto.password !== undefined &&
-      updateUserDto.password !== null
-    ) {
-      user.password = await bcryptjs.hash(updateUserDto.password as string, 10);
+    return utilisateur;
+  }
+
+  async findActive(): Promise<Utilisateurs[]> {
+    return await this.utilisateursRepository.find({
+      where: { active: true } as any,
+    });
+  }
+
+  async update(
+    id: string,
+    updateUserDto: UpdateUserDto,
+  ): Promise<Utilisateurs> {
+    if (!ObjectId.isValid(id)) {
+      throw new BadRequestException('ID invalide');
     }
 
-    return this.usersRepository.save(user);
+    const utilisateur = await this.findOneById(id);
+
+    Object.assign(utilisateur, updateUserDto);
+    utilisateur.updatedAt = new Date();
+
+    return await this.utilisateursRepository.save(utilisateur);
   }
 
   async remove(id: string): Promise<void> {
     if (!ObjectId.isValid(id)) {
-      throw new NotFoundException(`Invalid user ID: ${id}`);
+      throw new BadRequestException('ID invalide');
     }
-    const result = await this.usersRepository.delete(new ObjectId(id));
-    if (result.affected === 0) {
-      throw new NotFoundException(`User with ID ${id} not found`);
-    }
+
+    const utilisateur = await this.findOneById(id);
+
+    await this.utilisateursRepository.remove(utilisateur);
   }
 
-  async activateAccount(email: string, password: string): Promise<User> {
-    const user = await this.findOneByEmail(email);
-    if (!user) {
-      throw new NotFoundException('User not found');
+  async activateAccount(id: string, password: string): Promise<Utilisateurs> {
+    if (!ObjectId.isValid(id)) {
+      throw new BadRequestException('ID invalide');
     }
 
-    const isPasswordValid = await bcryptjs.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new Error('Invalid credentials');
+    const utilisateur = await this.findOneById(id);
+
+    // Vérifier le mot de passe
+    if (utilisateur.password !== password) {
+      throw new BadRequestException('Mot de passe incorrect');
     }
 
-    user.active = true;
-    return this.usersRepository.save(user);
+    // Activer le compte
+    utilisateur.active = true;
+    utilisateur.updatedAt = new Date();
+    return await this.utilisateursRepository.save(utilisateur);
+  }
+
+  /**
+   * Récupère les utilisateurs avec exclusion de champs sensibles selon le rôle
+   * @param role - Le rôle du demandeur ('admin' ou 'client')
+   * @returns Liste des utilisateurs avec les champs filtrés
+   */
+  async findAllWithRoleFilter(role: string): Promise<Partial<Utilisateurs>[]> {
+    const users = await this.utilisateursRepository.find();
+
+    return users.map((user) => {
+      if (role === 'admin') {
+        // Admin voit tout sauf le mot de passe
+        const { password, ...userWithoutPassword } = user as any;
+        return userWithoutPassword;
+      } else {
+        // Client voit uniquement id, username et email
+        return {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+        };
+      }
+    });
+  }
+
+  async findUsersNotUpdatedSince6Months(): Promise<Utilisateurs[]> {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    // Utilisation de MongoDB query native
+    const users = await this.utilisateursRepository.find({
+      where: {
+        updatedAt: { $lt: sixMonthsAgo } as any,
+      } as any,
+    });
+
+    return users;
+  }
+
+  async findWithAdvancedFilters(filters?: {
+    role?: string;
+    active?: boolean;
+    updatedBefore?: Date;
+    updatedAfter?: Date;
+  }): Promise<Utilisateurs[]> {
+    const whereConditions: any = {};
+
+    if (filters?.role) {
+      whereConditions.role = filters.role;
+    }
+
+    if (filters?.active !== undefined) {
+      whereConditions.active = filters.active;
+    }
+
+    if (filters?.updatedBefore || filters?.updatedAfter) {
+      whereConditions.updatedAt = {};
+      if (filters?.updatedBefore) {
+        whereConditions.updatedAt.$lt = filters.updatedBefore;
+      }
+      if (filters?.updatedAfter) {
+        whereConditions.updatedAt.$gt = filters.updatedAfter;
+      }
+    }
+
+    return await this.utilisateursRepository.find({
+      where: whereConditions as any,
+    });
   }
 }
